@@ -24,7 +24,7 @@
 ## 配置 Cloudflare
 
 在 [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens) 创建自定义 Token：
-- 创建入口：主页右上角头像处点击后选择配置文件，进入个人资料界面即可创建自定义token，或直接网址进入：https://dash.cloudflare.com/profile/settings
+- 创建入口：点击蓝链
 - 权限：`Account` → `Cloudflare Pages` → `Edit`
 - 资源：只选择准备使用的那个 Cloudflare Account
 - 不要使用 Global API Key
