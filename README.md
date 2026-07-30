@@ -54,7 +54,7 @@ https://dash.cloudflare.com/你的账户ID/home
 
 | 文件 | 用途 |
 | --- | --- |
-| `Codex对话-一键同步.cmd` | 日常使用：检查变化并部署到手机网页 |
+| `Codex对话-一键同步.cmd` | 日常使用：检查变化并立即同步更新并部署到手机网页 |
 | `Codex对话-管理菜单.cmd` | 初始化、状态、安全检查、网址、自动同步、口令和 Token 管理 |
 | `sync-auto.cmd` | Windows 计划任务内部入口，普通用户无需双击 |
 
