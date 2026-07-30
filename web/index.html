@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f5f5f2">
+  <meta name="referrer" content="no-referrer">
+  <title>Codex 对话</title>
+  <script src="theme-init.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="app.webmanifest">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <main id="locked" class="lock-view">
+    <section class="lock-panel" aria-labelledby="lock-title">
+      <div class="brand-mark" aria-hidden="true">C</div>
+      <p class="eyebrow">CODEX MOBILE VIEWER</p>
+      <h1 id="lock-title">你的对话，仍由你掌握</h1>
+      <p class="lock-copy">输入首次设置时生成的解锁口令。口令和明文只在此设备的当前页面内存中使用。</p>
+      <form id="unlock-form">
+        <label for="passphrase">解锁口令</label>
+        <div class="password-row">
+          <input id="passphrase" name="passphrase" type="password" autocomplete="current-password" autocapitalize="none" spellcheck="false" required>
+          <button id="toggle-passphrase" type="button" class="icon-button" aria-label="显示口令" title="显示或隐藏口令">查看</button>
+        </div>
+        <button id="unlock-button" type="submit" class="primary-button">解锁对话</button>
+      </form>
+      <p id="lock-status" class="status" role="status" aria-live="polite">正在验证加密快照…</p>
+    </section>
+  </main>
+
+  <main id="viewer" class="viewer" hidden>
+    <header class="topbar">
+      <button id="nav-button" class="icon-button nav-button" type="button" aria-label="打开对话列表" title="对话列表">列表</button>
+      <div class="topbar-title">
+        <span>CODEX 对话</span>
+        <small id="sync-time">只读快照</small>
+      </div>
+      <button id="theme-button" class="icon-button" type="button" aria-label="切换主题" title="切换主题">主题</button>
+      <button id="lock-button" class="icon-button" type="button" aria-label="立即锁定" title="立即锁定">锁定</button>
+    </header>
+    <div class="workspace">
+      <aside id="sidebar" class="sidebar" aria-label="对话列表">
+        <div class="search-wrap">
+          <label class="sr-only" for="search">搜索对话</label>
+          <input id="search" type="search" placeholder="搜索标题与正文" autocomplete="off">
+        </div>
+        <div class="list-summary"><span id="thread-count">0 个对话</span><span id="search-state"></span></div>
+        <nav id="thread-list" class="thread-list"></nav>
+      </aside>
+      <button id="scrim" class="scrim" type="button" aria-label="关闭对话列表" tabindex="-1"></button>
+      <article id="conversation" class="conversation">
+        <header id="conversation-header" class="conversation-header" hidden>
+          <p id="conversation-date" class="eyebrow"></p>
+          <h2 id="conversation-title"></h2>
+          <p id="conversation-meta"></p>
+        </header>
+        <div id="conversation-scroll" class="conversation-scroll">
+          <div id="empty-state" class="empty-state">
+            <p class="eyebrow">READ ONLY</p>
+            <h2>选择一条对话</h2>
+            <p>从列表中打开本地加密快照。</p>
+          </div>
+          <p id="conversation-status" class="conversation-status" role="status" aria-live="polite"></p>
+          <button id="load-older" class="load-older" type="button" hidden>加载更早消息</button>
+          <div id="messages" class="messages"></div>
+        </div>
+      </article>
+    </div>
+    <aside id="title-toggle-hint" class="title-toggle-hint" role="status" hidden>
+      <span>轻点对话区域，可收起或显示标题。</span>
+      <button id="title-toggle-hint-close" type="button" aria-label="关闭提示" title="关闭提示">×</button>
+    </aside>
+    <button id="reader-zoom-reset" class="reader-zoom-reset" type="button"
+      aria-label="恢复默认字号" title="恢复默认字号" hidden>100%</button>
+  </main>
+  <noscript>此查看器需要 JavaScript 才能在设备本地解密对话。</noscript>
+</body>
+</html>

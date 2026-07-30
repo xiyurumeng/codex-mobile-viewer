@@ -1,0 +1,14 @@
+{
+  "name": "codex-mobile-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test --test-isolation=none",
+    "setup": "node src/cli.mjs setup",
+    "sync": "node src/cli.mjs sync",
+    "status": "node src/cli.mjs status",
+    "security-check": "node src/cli.mjs security-check"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "cloudflare": { "projectName": "", "accountId": "" },
+  "sync": {
+    "dailyTimes": ["00:00", "11:55"],
+    "retryMinutes": [],
+    "wakeToRun": false,
+    "startWhenAvailable": true,
+    "runOnNetworkReconnect": true,
+    "maximumScheduledDeploysPerDay": 2,
+    "maximumScheduledDeploysPerMonth": 62
+  },
+  "security": {
+    "pbkdf2Iterations": 600000,
+    "idleLockMinutes": 5,
+    "maximumPlaintextChunkBytes": 4194304
+  }
+}

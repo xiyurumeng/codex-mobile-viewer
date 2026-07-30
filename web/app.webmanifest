@@ -1,0 +1,8 @@
+{
+  "name": "Codex 对话查看器",
+  "short_name": "Codex 对话",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f5f5f2",
+  "theme_color": "#f5f5f2"
+}
