@@ -118,31 +118,6 @@ LocalStorage 只保存非敏感的签名公钥指纹、最高快照序号、主�
 - 普通对话只同步 Codex Desktop 当前侧栏索引中的任务；侧栏已经隐藏但磁盘仍保留的旧会话不会进入快照。明确的侧边任务仍会保留，父对话已隐藏时显示为未归类侧边任务。
 - 页面切入后台后会立即清除明文并锁定；再次解锁会回到“选择一条对话”的默认页。
 
-## 发布到 GitHub
-
-GitHub 仓库只发布程序源码，不发布本机密钥、配置、日志或任何加密对话快照。现有 Cloudflare Pages 使用 Direct Upload，发布 GitHub 后不会自动关联仓库，也不会改变当前部署方式。
-
-发布前先决定仓库是公开还是私有。若公开并希望允许他人修改和分发，请先选择并添加许可证，例如 MIT；没有 `LICENSE` 时，默认并不授予他人复制和分发权。
-
-1. 在 GitHub 新建一个完全空的仓库，不勾选自动创建 README、`.gitignore` 或许可证。
-2. 只在本项目目录 `codex-mobile-viewer` 内初始化 Git，不要在它的上级目录或整个工作区根目录初始化。
-3. 先用 `git add --dry-run .` 检查候选文件，确认没有 `data`、`dist`、`dist.previous`、`dist.staging.*`、`logs`、`.env`、`*.dpapi` 或密钥文件。
-4. 确认后再提交源码并推送到刚创建的空仓库。
-
-```cmd
-cd /d C:\path\to\codex-mobile-viewer
-git init
-git branch -M main
-git status --short --ignored
-git add --dry-run .
-git add .
-git commit -m "Initial release"
-git remote add origin https://github.com/你的用户名/codex-mobile-viewer.git
-git push -u origin main
-```
-
-如果敏感文件曾经进入提交，仅在下一次提交中删除并不安全，因为旧版本仍在 Git 历史中。应立即停止推送、撤销相关 Token，并在确认处理方式后清理历史或重新创建仓库。
-
 ## 无法消除的风险
 
 纯静态网站无法在 Cloudflare 账号被完全控制、网页程序整体被替换时提供绝对防护。签名可以阻止攻击者只修改密文或清单，但若假网页本身被部署，它仍可能诱导输入口令。因此：
