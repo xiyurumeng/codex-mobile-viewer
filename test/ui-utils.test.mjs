@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildThreadTree, canToggleConversationTitle, clampReaderScale, filterThreadTree,
+  buildMessageOutline, manifestVersionChanged, normalizePassphrase,
   latestBatchStart, olderBatchStart, pointDistance, preserveScrollTop,
   preserveBottomOffset, preserveScrollRatio, readerScaleFromPinch,
   remainingMessagesBeforeChunk, resolveTheme, sortThreadsByUpdatedAt
@@ -78,6 +79,30 @@ test("reader pinch waits for the activation threshold and clamps its scale", () 
   }).scale, 1.3);
   assert.equal(clampReaderScale(0.2), 0.85);
   assert.equal(clampReaderScale("invalid"), 1);
+});
+
+test("normalizes copied passphrases without changing generated characters", () => {
+  assert.equal(normalizePassphrase("  abcde－fghij\n"), "abcde-fghij");
+  assert.equal(normalizePassphrase("abcde-fghij"), "abcde-fghij");
+});
+
+test("detects a rotated snapshot manifest without relying on the passphrase", () => {
+  const current = { signed: { sequence: 4, publicKey: "key", keyEnvelope: { salt: "a" }, indexFile: "snapshot.enc.json" } };
+  assert.equal(manifestVersionChanged(current, { signed: { ...current.signed } }), false);
+  assert.equal(manifestVersionChanged(current, { signed: { ...current.signed, sequence: 5 } }), true);
+  assert.equal(manifestVersionChanged(current, { signed: { ...current.signed, keyEnvelope: { salt: "b" } } }), true);
+});
+
+test("builds a searchable outline from user questions only", () => {
+  const outline = buildMessageOutline([
+    { role: "user", text: "第一 个问题" },
+    { role: "assistant", text: "答案" },
+    { role: "user", text: "第二个问题" }
+  ], 5);
+  assert.deepEqual(outline, [
+    { messageIndex: 0, questionNumber: 1, preview: "第一 个问…" },
+    { messageIndex: 2, questionNumber: 2, preview: "第二个问题" }
+  ]);
 });
 
 test("thread tree groups only explicit side tasks and keeps orphaned tasks visible", () => {

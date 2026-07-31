@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const appSource = fs.readFileSync(path.join(root, "web", "app.js"), "utf8");
+const htmlSource = fs.readFileSync(path.join(root, "web", "index.html"), "utf8");
 
 function sourceBetween(source, startMarker, endMarker) {
   const start = source.indexOf(startMarker);
@@ -16,10 +17,9 @@ function sourceBetween(source, startMarker, endMarker) {
 }
 
 test("theme bootstrap blocks the first paint before styles and the app module", () => {
-  const html = fs.readFileSync(path.join(root, "web", "index.html"), "utf8");
-  const theme = html.indexOf('<script src="theme-init.js"></script>');
-  const styles = html.indexOf('<link rel="stylesheet" href="styles.css">');
-  const app = html.indexOf('<script type="module" src="app.js"></script>');
+  const theme = htmlSource.indexOf('<script src="theme-init.js"></script>');
+  const styles = htmlSource.indexOf('<link rel="stylesheet" href="styles.css">');
+  const app = htmlSource.indexOf('<script type="module" src="app.js"></script>');
   assert.ok(theme >= 0 && theme < styles && styles < app);
 });
 
@@ -101,4 +101,77 @@ test("locking clears and remasks the passphrase field", () => {
   assert.match(appSource, /\$\("#lock-button"\)\.addEventListener\("click", \(\) => lockViewer\(/u);
   const visibility = sourceBetween(appSource, 'document.addEventListener("visibilitychange"', "initializeTheme();");
   assert.match(visibility, /lockViewer\(/u);
+});
+
+test("question outline controls are present and reset with plaintext state", () => {
+  for (const id of [
+    "outline-button", "message-outline", "outline-search", "outline-count",
+    "outline-status", "outline-list", "outline-close", "outline-scrim"
+  ]) assert.match(htmlSource, new RegExp(`id=["']${id}["']`, "u"));
+
+  const resetting = sourceBetween(appSource, "function resetMessageOutline() {", "function renderMessageOutline(");
+  assert.match(resetting, /state\.outlineRequest \+= 1/u);
+  assert.match(resetting, /state\.outlineEntries = \[\]/u);
+  assert.match(resetting, /state\.outlineThreadId = null/u);
+  assert.match(resetting, /closeMessageOutline\(\)/u);
+
+  const clearing = sourceBetween(appSource, "function clearPlaintext() {", "function lockViewer(");
+  assert.match(clearing, /resetConversationView\(\)/u);
+  assert.match(clearing, /state\.sessions\.clear\(\)/u);
+});
+
+test("forced manifest refresh bypasses caches and verifies before returning", () => {
+  const fetching = sourceBetween(appSource, "async function fetchManifest(", "async function decryptEnvelope(");
+  assert.match(fetching, /manifest\.json\?cmv=\$\{Date\.now\(\)\}/u);
+  const verifying = fetching.indexOf("await verifyManifest(manifest);");
+  const returning = fetching.indexOf("return manifest;");
+  assert.ok(verifying >= 0 && verifying < returning);
+});
+
+test("a valid signed manifest advances the rollback floor before unlock", () => {
+  const verifying = sourceBetween(appSource, "async function verifyManifest(manifest) {", "async function fetchManifest(");
+  const signatureAccepted = verifying.indexOf('if (!valid) throw new Error("快照签名无效，已拒绝解锁。");');
+  const sequenceCommit = verifying.indexOf('localStorage.setItem("cmv.sequence"');
+  assert.ok(signatureAccepted >= 0 && signatureAccepted < sequenceCommit);
+  assert.match(verifying, /Number\.isSafeInteger\(sequence\)/u);
+});
+
+test("unlock retries only once after a verified manifest version change", () => {
+  const unlocking = sourceBetween(appSource, "async function unlock(event) {", "async function initialize() {");
+  assert.equal(unlocking.match(/fetchManifest\(\{ force: true \}\)/gu)?.length, 1);
+  const refresh = unlocking.indexOf("latest = await fetchManifest({ force: true });");
+  const versionCheck = unlocking.indexOf("manifestVersionChanged(state.manifest, latest)");
+  const switchManifest = unlocking.indexOf("state.manifest = latest;");
+  const retry = unlocking.indexOf("result = await attempt(latest);");
+  assert.ok(refresh >= 0 && refresh < versionCheck);
+  assert.ok(versionCheck < switchManifest && switchManifest < retry);
+  assert.match(unlocking, /if \(initialError\?\.name !== "OperationError"\) throw initialError;/u);
+});
+
+test("candidate keys stay local until the index has decrypted successfully", () => {
+  const unlocking = sourceBetween(appSource, "async function unlock(event) {", "async function initialize() {");
+  const attemptStart = unlocking.indexOf("const attempt = async (manifest) => {");
+  const attemptEnd = unlocking.indexOf("try {", attemptStart);
+  const attempt = unlocking.slice(attemptStart, attemptEnd);
+  assert.match(attempt, /contentKey,/u);
+  assert.doesNotMatch(attempt, /state\.contentKey\s*=/u);
+  const commit = unlocking.indexOf("state.contentKey = result.contentKey;");
+  const resultGuard = unlocking.indexOf("if (!result)");
+  assert.ok(commit > resultGuard);
+});
+
+test("refresh controls exist for locked and unlocked pages", () => {
+  assert.match(htmlSource, /id="lock-refresh-button"/u);
+  assert.match(htmlSource, /id="refresh-button"/u);
+  const refreshing = sourceBetween(appSource, "async function refreshViewerManifest() {", "function clearPlaintext() {");
+  assert.match(refreshing, /manifestVersionChanged\(previous, latest\)/u);
+  assert.match(refreshing, /state\.manifest = latest;\s*lockViewer\(/u);
+});
+
+test("outline jumps within the conversation scroller instead of the page viewport", () => {
+  const jumping = sourceBetween(appSource, "function jumpToMessage(messageIndex) {", "function renderThreadList(");
+  assert.match(jumping, /target\.getBoundingClientRect\(\)\.top/u);
+  assert.match(jumping, /scroller\.getBoundingClientRect\(\)\.top/u);
+  assert.match(jumping, /scroller\.scrollTop = Math\.max/u);
+  assert.doesNotMatch(jumping, /scrollIntoView/u);
 });
