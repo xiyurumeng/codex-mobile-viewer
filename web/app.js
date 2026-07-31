@@ -1,5 +1,6 @@
 import {
   buildThreadTree, canToggleConversationTitle, clampReaderScale, filterThreadTree,
+  buildMessageOutline, manifestVersionChanged, normalizePassphrase,
   latestBatchStart, olderBatchStart, pointDistance, preserveScrollTop,
   preserveBottomOffset, preserveScrollRatio, readerScaleFromPinch,
   remainingMessagesBeforeChunk, resolveTheme, sortThreadsByUpdatedAt
@@ -30,7 +31,10 @@ const state = {
   hintTimer: null, idleMinutes: 5, observedBytesPerSecond: 0,
   titleCollapsed: false, titleLayoutRequest: 0, lastScrollTop: 0,
   readerScale: 1, zoomGesture: null, zoomIndicatorTimer: null,
-  expandedThreadIds: new Set()
+  expandedThreadIds: new Set(),
+  outlineThreadId: null, outlineEntries: [], outlineBuilt: false,
+  outlineRequest: 0, outlineLoading: false, outlineQuery: "",
+  manifestRequest: 0, refreshingManifest: false, refreshFeedbackTimer: null
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -114,12 +118,14 @@ async function removeOldCipherCaches() {
 
 async function verifyManifest(manifest) {
   if (!manifest?.signed || !manifest.signature) throw new Error("快照清单格式无效。");
+  const sequence = Number(manifest.signed.sequence);
+  if (!Number.isSafeInteger(sequence) || sequence < 1) throw new Error("快照序号无效。");
   const publicBytes = pemBytes(manifest.signed.publicKey);
   const fingerprint = await sha256Hex(publicBytes);
   const trusted = localStorage.getItem("cmv.trustedPublicKey");
   if (trusted && trusted !== fingerprint) throw new Error("签名公钥与本设备首次信任的指纹不同，已拒绝解锁。");
   const previousSequence = Number(localStorage.getItem("cmv.sequence") || 0);
-  if (previousSequence && manifest.signed.sequence < previousSequence) throw new Error("云端快照版本发生回退，已拒绝解锁。");
+  if (previousSequence && sequence < previousSequence) throw new Error("云端快照版本发生回退，已拒绝解锁。");
   let key;
   try { key = await crypto.subtle.importKey("spki", publicBytes, { name: "Ed25519" }, false, ["verify"]); }
   catch { throw new Error("此浏览器不支持 Ed25519 签名验证，请升级浏览器。"); }
@@ -128,6 +134,15 @@ async function verifyManifest(manifest) {
   );
   if (!valid) throw new Error("快照签名无效，已拒绝解锁。");
   localStorage.setItem("cmv.trustedPublicKey", fingerprint);
+  localStorage.setItem("cmv.sequence", String(Math.max(previousSequence, sequence)));
+}
+
+async function fetchManifest({ force = false } = {}) {
+  const path = force ? `manifest.json?cmv=${Date.now()}` : "manifest.json";
+  const bytes = await fetchBytes(path);
+  const manifest = JSON.parse(decoder.decode(bytes));
+  await verifyManifest(manifest);
+  return manifest;
 }
 
 async function decryptEnvelope(envelope, key, additionalData) {
@@ -142,7 +157,7 @@ async function decryptEnvelope(envelope, key, additionalData) {
 }
 
 async function unwrapContentKey(passphrase, envelope) {
-  const material = await crypto.subtle.importKey("raw", encoder.encode(passphrase.normalize("NFKC")), "PBKDF2", false, ["deriveKey"]);
+  const material = await crypto.subtle.importKey("raw", encoder.encode(normalizePassphrase(passphrase)), "PBKDF2", false, ["deriveKey"]);
   const wrappingKey = await crypto.subtle.deriveKey({
     name: "PBKDF2", salt: bytesFromBase64(envelope.salt), iterations: envelope.iterations, hash: "SHA-256"
   }, material, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
@@ -151,14 +166,16 @@ async function unwrapContentKey(passphrase, envelope) {
 }
 
 async function loadEncryptedJson(pathname, additionalData, {
-  cacheCipher = false, priority = "user", onProgress
+  cacheCipher = false, priority = "user", onProgress,
+  manifest = state.manifest, contentKey = state.contentKey
 } = {}) {
-  const expected = state.manifest.signed.files[pathname];
+  const expected = manifest?.signed?.files?.[pathname];
   if (!expected) throw new Error(`清单缺少文件：${pathname}`);
   const envelope = JSON.parse(decoder.decode(await fetchBytes(pathname, expected, {
     cacheCipher, priority, onProgress
   })));
-  return JSON.parse(decoder.decode(await decryptEnvelope(envelope, state.contentKey, additionalData)));
+  if (!contentKey) throw new Error("解密密钥不可用。");
+  return JSON.parse(decoder.decode(await decryptEnvelope(envelope, contentKey, additionalData)));
 }
 
 function setLockStatus(message, error = false) {
@@ -345,9 +362,10 @@ function renderMarkdown(text) {
   return root;
 }
 
-function createMessageElement(message) {
+function createMessageElement(message, messageIndex = null) {
   const article = document.createElement("section");
   article.className = `message ${message.role === "user" ? "user" : message.phase}`;
+  if (Number.isInteger(messageIndex)) article.dataset.messageIndex = String(messageIndex);
   const label = document.createElement("div");
   label.className = "message-label";
   label.textContent = message.role === "user" ? "你" : message.phase === "commentary" ? "Codex · 过程更新" : "Codex";
@@ -384,7 +402,9 @@ function renderLegacyLatestMessages(session) {
   const messages = $("#messages");
   state.renderedStart = latestBatchStart(session.messages.length, UI_CONFIG.initialMessageBatch);
   const fragment = document.createDocumentFragment();
-  for (const message of session.messages.slice(state.renderedStart)) fragment.append(createMessageElement(message));
+  for (let index = state.renderedStart; index < session.messages.length; index += 1) {
+    fragment.append(createMessageElement(session.messages[index], index));
+  }
   messages.replaceChildren(fragment);
   updateOlderControl();
   scrollConversationToBottom();
@@ -392,7 +412,7 @@ function renderLegacyLatestMessages(session) {
 
 function renderLatestChunk(chunk) {
   const fragment = document.createDocumentFragment();
-  for (const message of chunk.messages) fragment.append(createMessageElement(message));
+  chunk.messages.forEach((message, offset) => fragment.append(createMessageElement(message, chunk.start + offset)));
   $("#messages").replaceChildren(fragment);
   updateOlderControl();
   scrollConversationToBottom();
@@ -447,7 +467,9 @@ async function loadOlderMessages() {
     const oldHeight = scroller.scrollHeight;
     const oldTop = scroller.scrollTop;
     const fragment = document.createDocumentFragment();
-    for (const message of chunk.messages) fragment.append(createMessageElement(message));
+    chunk.messages.forEach((message, offset) => {
+      fragment.append(createMessageElement(message, chunk.start + offset));
+    });
     $("#messages").prepend(fragment);
     state.firstLoadedChunkIndex = nextChunkIndex;
     await new Promise((resolve) => requestAnimationFrame(resolve));
@@ -466,6 +488,157 @@ async function loadOlderMessages() {
       updateOlderControl();
     }
   }
+}
+
+function currentLoadedMessages() {
+  return cachedSessionMessages(state.currentSession);
+}
+
+function renderAllCurrentMessages() {
+  const messages = currentLoadedMessages();
+  const fragment = document.createDocumentFragment();
+  messages.forEach((message, index) => fragment.append(createMessageElement(message, index)));
+  $("#messages").replaceChildren(fragment);
+  if (state.currentSession?.kind === "chunked") state.firstLoadedChunkIndex = 0;
+  else state.renderedStart = 0;
+  updateOlderControl();
+}
+
+function closeMessageOutline() {
+  if (state.outlineLoading) {
+    state.outlineRequest += 1;
+    state.outlineLoading = false;
+    $("#outline-button").disabled = !state.currentSession;
+  }
+  const panel = $("#message-outline");
+  panel.hidden = true;
+  panel.classList.remove("open");
+  panel.setAttribute("aria-hidden", "true");
+  $("#outline-scrim").hidden = true;
+  $("#outline-button").setAttribute("aria-expanded", "false");
+}
+
+function resetMessageOutline() {
+  state.outlineRequest += 1;
+  state.outlineThreadId = null;
+  state.outlineEntries = [];
+  state.outlineBuilt = false;
+  state.outlineLoading = false;
+  state.outlineQuery = "";
+  $("#outline-search").value = "";
+  $("#outline-count").textContent = "0 个问题";
+  $("#outline-status").textContent = "";
+  $("#outline-status").classList.remove("error");
+  $("#outline-list").replaceChildren();
+  $("#outline-button").disabled = true;
+  closeMessageOutline();
+}
+
+function renderMessageOutline(query = state.outlineQuery) {
+  state.outlineQuery = query;
+  const list = $("#outline-list");
+  list.replaceChildren();
+  const normalized = query.trim().toLocaleLowerCase();
+  const entries = state.outlineEntries.filter((entry) => !normalized
+    || entry.preview.toLocaleLowerCase().includes(normalized));
+  entries.forEach((entry) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "outline-item";
+    button.dataset.messageIndex = String(entry.messageIndex);
+    button.innerHTML = `<span class="outline-number">${entry.questionNumber}</span><span class="outline-preview"></span>`;
+    button.querySelector(".outline-preview").textContent = entry.preview;
+    button.addEventListener("click", () => jumpToMessage(entry.messageIndex));
+    list.append(button);
+  });
+  $("#outline-count").textContent = normalized
+    ? `${entries.length} / ${state.outlineEntries.length} 个问题`
+    : `${state.outlineEntries.length} 个问题`;
+  if (!entries.length) {
+    const empty = document.createElement("p");
+    empty.className = "outline-empty";
+    empty.textContent = normalized ? "没有匹配的问题" : "这条对话没有用户问题";
+    list.append(empty);
+  }
+}
+
+async function loadAllOutlineChunks(thread, request) {
+  if (!isChunkedThread(thread)) return true;
+  for (let chunkIndex = thread.chunks.length - 1; chunkIndex >= 0; chunkIndex -= 1) {
+    if (request !== state.outlineRequest || state.selectedId !== thread.id || !state.contentKey) return false;
+    await loadThreadChunk(thread, chunkIndex, {
+      priority: "user",
+      onProgress({ loaded, total }) {
+        if (request !== state.outlineRequest) return;
+        const progress = formatTransferProgress(loaded, total)
+          .replace("正在读取加密对话", "正在建立问题目录");
+        $("#outline-status").textContent = progress;
+      }
+    });
+  }
+  return true;
+}
+
+async function openMessageOutline() {
+  if (!state.currentThread || !state.currentSession) return;
+  const panel = $("#message-outline");
+  if (!panel.hidden) {
+    closeMessageOutline();
+    return;
+  }
+  panel.hidden = false;
+  panel.classList.add("open");
+  panel.setAttribute("aria-hidden", "false");
+  $("#outline-scrim").hidden = false;
+  $("#outline-button").setAttribute("aria-expanded", "true");
+  closeSidebar();
+  if (state.outlineBuilt && state.outlineThreadId === state.currentThread.id) {
+    renderMessageOutline();
+    $("#outline-search").focus({ preventScroll: true });
+    return;
+  }
+  const request = ++state.outlineRequest;
+  state.outlineLoading = true;
+  $("#outline-status").textContent = "正在建立问题目录…";
+  $("#outline-status").classList.remove("error");
+  $("#outline-list").replaceChildren();
+  $("#outline-count").textContent = "正在读取…";
+  $("#outline-button").disabled = true;
+  try {
+    if (!await loadAllOutlineChunks(state.currentThread, request)) return;
+    if (request !== state.outlineRequest || !state.currentSession) return;
+    renderAllCurrentMessages();
+    state.outlineEntries = buildMessageOutline(currentLoadedMessages());
+    state.outlineThreadId = state.currentThread.id;
+    state.outlineBuilt = true;
+    $("#outline-status").textContent = "";
+    renderMessageOutline();
+    $("#outline-search").focus({ preventScroll: true });
+  } catch (error) {
+    if (request === state.outlineRequest) {
+      $("#outline-status").textContent = `问题目录失败：${error.message}`;
+      $("#outline-status").classList.add("error");
+    }
+  } finally {
+    if (request === state.outlineRequest) {
+      state.outlineLoading = false;
+      $("#outline-button").disabled = false;
+    }
+  }
+}
+
+function jumpToMessage(messageIndex) {
+  const target = [...$("#messages").querySelectorAll("[data-message-index]")]
+    .find((element) => Number(element.dataset.messageIndex) === messageIndex);
+  if (!target) return;
+  const scroller = $("#conversation-scroll");
+  const targetTop = target.getBoundingClientRect().top;
+  const scrollerTop = scroller.getBoundingClientRect().top;
+  scroller.scrollTop = Math.max(0, scroller.scrollTop + targetTop - scrollerTop - 16);
+  state.lastScrollTop = scroller.scrollTop;
+  document.querySelectorAll(".outline-item.active").forEach((item) => item.classList.remove("active"));
+  $("#outline-list").querySelector(`[data-message-index="${messageIndex}"]`)?.classList.add("active");
+  closeMessageOutline();
 }
 
 function renderThreadList(query = "") {
@@ -547,6 +720,7 @@ async function openThread(thread) {
   state.renderedStart = 0;
   state.loadingOlder = false;
   state.olderProgress = "";
+  resetMessageOutline();
   setTitleCollapsed(false, { preserveScroll: false });
   $("#empty-state").hidden = true;
   $("#conversation-header").hidden = false;
@@ -568,6 +742,7 @@ async function openThread(thread) {
         $("#conversation-meta").textContent = `${thread.turns} 轮 · 0 条可见消息`;
         setConversationStatus();
         renderLatestChunk({ messages: [] });
+        $("#outline-button").disabled = false;
         showTitleHintOnce();
         return;
       }
@@ -608,6 +783,7 @@ async function openThread(thread) {
       setConversationStatus();
       renderLegacyLatestMessages(session.data);
     }
+    $("#outline-button").disabled = false;
     showTitleHintOnce();
     renderThreadList($("#search").value);
   } catch (error) {
@@ -739,6 +915,7 @@ function resetConversationView() {
   state.loadingOlder = false;
   state.olderProgress = "";
   state.lastScrollTop = 0;
+  resetMessageOutline();
   setTitleCollapsed(false, { preserveScroll: false });
   $("#conversation-header").hidden = true;
   $("#conversation-title").textContent = "";
@@ -763,6 +940,83 @@ function resetIdleTimer() {
   if (state.contentKey) state.idleTimer = setTimeout(() => lockViewer("因闲置已自动锁定。"), state.idleMinutes * 60 * 1000);
 }
 
+function setRefreshControlsBusy(busy) {
+  state.refreshingManifest = busy;
+  const lockRefresh = $("#lock-refresh-button");
+  const viewerRefresh = $("#refresh-button");
+  if (lockRefresh) {
+    lockRefresh.disabled = busy;
+    lockRefresh.textContent = busy ? "正在检查…" : "检查新快照";
+  }
+  if (viewerRefresh) {
+    viewerRefresh.disabled = busy;
+    if (busy) viewerRefresh.textContent = "检查中";
+    else if (!state.refreshFeedbackTimer) viewerRefresh.textContent = "更新";
+  }
+}
+
+function showViewerRefreshFeedback(message, error = false) {
+  clearTimeout(state.refreshFeedbackTimer);
+  const button = $("#refresh-button");
+  button.textContent = message;
+  button.classList.toggle("error", error);
+  state.refreshFeedbackTimer = setTimeout(() => {
+    state.refreshFeedbackTimer = null;
+    button.textContent = "更新";
+    button.classList.remove("error");
+  }, 2500);
+}
+
+async function refreshLockedManifest() {
+  if (state.refreshingManifest || state.unlocking) return;
+  const request = ++state.manifestRequest;
+  const previous = state.manifest;
+  setRefreshControlsBusy(true);
+  $("#unlock-button").disabled = true;
+  setLockStatus("正在验证云端最新快照…");
+  try {
+    const latest = await fetchManifest({ force: true });
+    if (request !== state.manifestRequest) return;
+    const changed = manifestVersionChanged(previous, latest);
+    state.manifest = latest;
+    $("#unlock-button").disabled = false;
+    if (!previous) setLockStatus("快照验证通过，等待解锁。");
+    else if (changed) setLockStatus(`检测到新快照（序号 ${latest.signed.sequence}），请输入当前口令。`);
+    else setLockStatus("当前已是最新快照，可以继续输入口令。");
+  } catch (error) {
+    if (request !== state.manifestRequest) return;
+    $("#unlock-button").disabled = !state.manifest;
+    setLockStatus(`检查新快照失败：${error.message}`, true);
+  } finally {
+    if (request === state.manifestRequest) setRefreshControlsBusy(false);
+  }
+}
+
+async function refreshViewerManifest() {
+  if (state.refreshingManifest || !state.contentKey) return;
+  const request = ++state.manifestRequest;
+  const previous = state.manifest;
+  setRefreshControlsBusy(true);
+  try {
+    const latest = await fetchManifest({ force: true });
+    if (request !== state.manifestRequest || !state.contentKey) return;
+    if (!manifestVersionChanged(previous, latest)) {
+      setRefreshControlsBusy(false);
+      showViewerRefreshFeedback("已是最新");
+      return;
+    }
+    state.manifest = latest;
+    lockViewer(`检测到新快照（序号 ${latest.signed.sequence}），请输入当前同步生成的口令。`);
+  } catch (error) {
+    if (request !== state.manifestRequest) return;
+    setRefreshControlsBusy(false);
+    showViewerRefreshFeedback("检查失败", true);
+    console.warn("Snapshot refresh failed:", error);
+  } finally {
+    if (request === state.manifestRequest) setRefreshControlsBusy(false);
+  }
+}
+
 function clearPlaintext() {
   transferManager.cancelAll();
   state.contentKey = null;
@@ -772,14 +1026,23 @@ function clearPlaintext() {
   state.openRequest += 1;
   state.searchRequest += 1;
   state.unlockRequest += 1;
+  state.manifestRequest += 1;
   state.unlocking = false;
+  state.refreshingManifest = false;
   clearTimeout(state.idleTimer);
+  clearTimeout(state.refreshFeedbackTimer);
+  state.refreshFeedbackTimer = null;
   clearTimeout(searchTimer);
   resetConversationView();
   $("#thread-list").replaceChildren();
   $("#thread-count").textContent = "0 个对话";
   $("#passphrase").value = "";
   $("#passphrase").type = "password";
+  $("#refresh-button").textContent = "更新";
+  $("#refresh-button").classList.remove("error");
+  $("#refresh-button").disabled = false;
+  $("#lock-refresh-button").textContent = "检查新快照";
+  $("#lock-refresh-button").disabled = false;
 }
 
 function lockViewer(message = "已锁定。", error = false) {
@@ -793,31 +1056,68 @@ function lockViewer(message = "已锁定。", error = false) {
 
 async function unlock(event) {
   event.preventDefault();
+  if (state.refreshingManifest || state.unlocking || !state.manifest) return;
   const request = ++state.unlockRequest;
   const button = $("#unlock-button");
-  const passphrase = $("#passphrase").value;
+  const passphrase = normalizePassphrase($("#passphrase").value);
+  if (!passphrase) {
+    setLockStatus("请输入解锁口令。", true);
+    return;
+  }
   state.unlocking = true;
   button.disabled = true;
+  $("#lock-refresh-button").disabled = true;
   setLockStatus("正在本设备上派生解密密钥…");
-  try {
-    const contentKey = await unwrapContentKey(passphrase, state.manifest.signed.keyEnvelope);
-    if (request !== state.unlockRequest || document.hidden) {
-      if (request === state.unlockRequest) lockViewer("页面进入后台，解锁已取消。");
-      return;
-    }
-    state.contentKey = contentKey;
-    const index = await loadEncryptedJson(state.manifest.signed.indexFile, state.manifest.signed.indexFile, {
+  let checkedLatest = false;
+  let switchedManifest = false;
+  let refreshFailure = null;
+
+  const attempt = async (manifest) => {
+    const contentKey = await unwrapContentKey(passphrase, manifest.signed.keyEnvelope);
+    if (request !== state.unlockRequest || document.hidden) return null;
+    const index = await loadEncryptedJson(manifest.signed.indexFile, manifest.signed.indexFile, {
+      manifest,
+      contentKey,
       onProgress({ loaded, total }) {
         if (request === state.unlockRequest) {
           setLockStatus(formatTransferProgress(loaded, total).replace("加密对话", "加密索引"));
         }
       }
     });
-    if (request !== state.unlockRequest || document.hidden) {
-      if (request === state.unlockRequest) lockViewer("页面进入后台，解锁已取消。");
+    if (request !== state.unlockRequest || document.hidden) return null;
+    return { contentKey, index, manifest };
+  };
+
+  try {
+    let result;
+    try {
+      result = await attempt(state.manifest);
+    } catch (initialError) {
+      if (request !== state.unlockRequest) return;
+      if (initialError?.name !== "OperationError") throw initialError;
+      setLockStatus("口令未匹配当前快照，正在检查是否已有新快照…");
+      let latest;
+      try {
+        latest = await fetchManifest({ force: true });
+        checkedLatest = true;
+      } catch (error) {
+        refreshFailure = error;
+        throw initialError;
+      }
+      if (request !== state.unlockRequest || document.hidden) return;
+      if (!manifestVersionChanged(state.manifest, latest)) throw initialError;
+      state.manifest = latest;
+      switchedManifest = true;
+      setLockStatus(`检测到新快照（序号 ${latest.signed.sequence}），正在使用同一口令重试…`);
+      result = await attempt(latest);
+    }
+    if (!result) {
+      if (request === state.unlockRequest && document.hidden) lockViewer("页面进入后台，解锁已取消。");
       return;
     }
-    state.index = index;
+    state.manifest = result.manifest;
+    state.contentKey = result.contentKey;
+    state.index = result.index;
     state.index.threads = sortThreadsByUpdatedAt(state.index.threads);
     const previousSequence = Number(localStorage.getItem("cmv.sequence") || 0);
     localStorage.setItem("cmv.sequence", String(Math.max(previousSequence, state.manifest.signed.sequence)));
@@ -834,23 +1134,31 @@ async function unlock(event) {
     if (request !== state.unlockRequest) return;
     clearPlaintext();
     button.disabled = false;
-    const message = error?.name === "OperationError"
-      ? "口令错误，或快照已损坏。"
-      : `无法解锁：${error.message}`;
+    let message;
+    if (error?.name === "OperationError" && switchedManifest) {
+      message = "已检测到新快照，但口令仍不正确。请使用最近一次生成并已同步的口令。";
+    } else if (error?.name === "OperationError" && refreshFailure) {
+      message = `口令未匹配当前快照，同时无法检查新快照：${refreshFailure.message}`;
+    } else if (error?.name === "OperationError" && checkedLatest) {
+      message = "口令错误；已检查云端，当前没有更新的快照。";
+    } else if (error?.name === "OperationError") {
+      message = "口令错误，或快照已损坏。";
+    } else {
+      message = `无法解锁：${error.message}`;
+    }
     setLockStatus(message, true);
   } finally {
     if (request === state.unlockRequest) {
       state.unlocking = false;
       button.disabled = false;
+      $("#lock-refresh-button").disabled = false;
     }
   }
 }
 
 async function initialize() {
   try {
-    const bytes = await fetchBytes("manifest.json");
-    state.manifest = JSON.parse(decoder.decode(bytes));
-    await verifyManifest(state.manifest);
+    state.manifest = await fetchManifest();
     setLockStatus("快照验证通过，等待解锁。");
   } catch (error) {
     $("#unlock-button").disabled = true;
@@ -970,11 +1278,18 @@ $("#toggle-passphrase").addEventListener("click", () => {
   field.type = field.type === "password" ? "text" : "password";
 });
 $("#lock-button").addEventListener("click", () => lockViewer("已手动锁定。"));
+$("#lock-refresh-button").addEventListener("click", refreshLockedManifest);
+$("#refresh-button").addEventListener("click", refreshViewerManifest);
+$("#outline-button").addEventListener("click", openMessageOutline);
+$("#outline-close").addEventListener("click", closeMessageOutline);
+$("#outline-scrim").addEventListener("click", closeMessageOutline);
+$("#outline-search").addEventListener("input", (event) => renderMessageOutline(event.target.value));
 $("#theme-button").addEventListener("click", () => {
   const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
   applyTheme(next, true);
 });
 $("#nav-button").addEventListener("click", () => {
+  closeMessageOutline();
   $("#sidebar").classList.add("open"); $("#scrim").classList.add("open");
 });
 $("#scrim").addEventListener("click", closeSidebar);
@@ -1000,6 +1315,9 @@ for (const eventName of ["pointerdown", "keydown", "scroll"]) {
 }
 document.addEventListener("visibilitychange", () => {
   if (document.hidden && (state.contentKey || state.unlocking)) lockViewer("页面进入后台，已自动锁定。");
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !$("#message-outline").hidden) closeMessageOutline();
 });
 initializeTheme();
 initializeReaderScale();

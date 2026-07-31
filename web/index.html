@@ -27,6 +27,7 @@
         </div>
         <button id="unlock-button" type="submit" class="primary-button">解锁对话</button>
       </form>
+      <button id="lock-refresh-button" type="button" class="secondary-button">检查新快照</button>
       <p id="lock-status" class="status" role="status" aria-live="polite">正在验证加密快照…</p>
     </section>
   </main>
@@ -38,6 +39,10 @@
         <span>CODEX 对话</span>
         <small id="sync-time">只读快照</small>
       </div>
+      <button id="outline-button" class="icon-button" type="button" aria-label="打开问题目录"
+        aria-controls="message-outline" aria-expanded="false" title="问题目录" disabled>目录</button>
+      <button id="refresh-button" class="icon-button" type="button" aria-label="检查新快照"
+        title="检查新快照">更新</button>
       <button id="theme-button" class="icon-button" type="button" aria-label="切换主题" title="切换主题">主题</button>
       <button id="lock-button" class="icon-button" type="button" aria-label="立即锁定" title="立即锁定">锁定</button>
     </header>
@@ -52,6 +57,28 @@
       </aside>
       <button id="scrim" class="scrim" type="button" aria-label="关闭对话列表" tabindex="-1"></button>
       <article id="conversation" class="conversation">
+        <button id="outline-scrim" class="outline-scrim" type="button"
+          aria-label="关闭问题目录" tabindex="-1" hidden></button>
+        <aside id="message-outline" class="message-outline" aria-labelledby="outline-title"
+          aria-hidden="true" hidden>
+          <header class="outline-header">
+            <div>
+              <p class="eyebrow">当前对话</p>
+              <h2 id="outline-title">问题目录</h2>
+            </div>
+            <button id="outline-close" class="icon-button outline-close" type="button"
+              aria-label="关闭问题目录" title="关闭问题目录">×</button>
+          </header>
+          <div class="outline-search-wrap">
+            <label class="sr-only" for="outline-search">搜索本对话中的问题</label>
+            <input id="outline-search" type="search" placeholder="搜索本对话中的问题" autocomplete="off">
+          </div>
+          <div class="outline-summary">
+            <span id="outline-count">0 个问题</span>
+          </div>
+          <p id="outline-status" class="outline-status" role="status" aria-live="polite"></p>
+          <nav id="outline-list" class="outline-list" aria-label="本对话的问题历史"></nav>
+        </aside>
         <header id="conversation-header" class="conversation-header" hidden>
           <p id="conversation-date" class="eyebrow"></p>
           <h2 id="conversation-title"></h2>

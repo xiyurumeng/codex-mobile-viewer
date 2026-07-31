@@ -1,5 +1,5 @@
 const SHELL_CACHE_PREFIX = "codex-mobile-viewer-shell-";
-const CACHE = `${SHELL_CACHE_PREFIX}v5`;
+const CACHE = `${SHELL_CACHE_PREFIX}v6`;
 const SHELL = ["./", "index.html", "theme-init.js", "styles.css", "app.js", "ui-utils.js", "network-utils.js", "app.webmanifest"];
 const SHELL_PATHS = new Set(SHELL.map((entry) => new URL(entry, self.location.href).pathname));
 

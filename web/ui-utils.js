@@ -119,3 +119,30 @@ export function readerScaleFromPinch({
     scale: nextActive ? clampReaderScale(initial * ratio, minimum, maximum) : initial
   };
 }
+
+export function normalizePassphrase(value) {
+  return String(value ?? "")
+    .normalize("NFKC")
+    .trim()
+    .replace(/[‐‑‒–—―−﹣－]/gu, "-");
+}
+
+export function manifestVersionChanged(current, next) {
+  if (!current?.signed || !next?.signed) return true;
+  return current.signed.sequence !== next.signed.sequence
+    || current.signed.publicKey !== next.signed.publicKey
+    || JSON.stringify(current.signed.keyEnvelope) !== JSON.stringify(next.signed.keyEnvelope)
+    || current.signed.indexFile !== next.signed.indexFile;
+}
+
+export function buildMessageOutline(messages, maxPreviewLength = 72) {
+  let questionNumber = 0;
+  return (messages ?? []).flatMap((message, messageIndex) => {
+    if (message?.role !== "user") return [];
+    questionNumber += 1;
+    const compact = String(message.text ?? "").replace(/\s+/gu, " ").trim();
+    const preview = Array.from(compact).slice(0, maxPreviewLength).join("")
+      + (Array.from(compact).length > maxPreviewLength ? "…" : "");
+    return [{ messageIndex, questionNumber, preview: preview || "（空问题）" }];
+  });
+}
