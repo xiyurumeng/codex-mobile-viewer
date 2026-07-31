@@ -40,7 +40,7 @@ https://dash.cloudflare.com/your-account-id/home
 Replace `your-account-id` with the actual 32-character Account ID. Do not put the API Token in this URL. Then:
 
 1. Open `Codex对话-管理菜单.cmd` and enter `Cloudflare 与网址设置` (Cloudflare and Site Settings).
-2. Enter an unused Pages project name, such as `my-codex-mobile`.
+2. Enter an unused Pages project name, such as `my-codex-mobile`，Note that this project name will be quoted as a website address. For details, please refer to the last line.
 3. Enter the Account ID.
 4. Enter the Token. The input is hidden, and the Token is immediately encrypted with Windows DPAPI before it is stored.
 5. Double-click `Codex对话-一键同步.cmd` to create and deploy the Direct Upload Pages project for the first time.
@@ -140,6 +140,12 @@ A static site cannot provide absolute protection if the Cloudflare account is fu
 
 Do not delete `data`, or automatic synchronization will no longer be able to unwrap the content master key. Even if the Cloudflare Token is stolen, an attacker cannot directly decrypt existing conversations. However, the attacker may be able to replace the web application, so you should still revoke the Token immediately.
 
+## Sync and Passphrase Recognition
+
+If you create a new passphrase in the "Codex-管理菜单.cmd", you must either select “Sync to Phone Now” in the menu or double-click "Codex-一键同步.cmd" once. Automatic synchronization does not require this; the previous passphrase will remain valid. Here, “previous passphrase” means the passphrase immediately before the newly created one, not every older passphrase.
+
+Automatic synchronization creates a scheduled task in Windows Task Scheduler. Its trigger condition is connecting to any network. You can view it by pressing Win + X and opening Computer Management. The task will perform synchronization even if the scheduled time has already passed, by running a catch-up synchronization. However, it has only two fixed synchronization slots per day, approximately 12 hours apart.
+
 ## Development Verification
 
 ```cmd
@@ -147,3 +153,4 @@ npm.cmd test
 node --check src\cli.mjs
 node --check web\app.js
 ```
+
