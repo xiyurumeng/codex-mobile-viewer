@@ -17,7 +17,7 @@
 2. 程序会显示一次随机解锁口令。立即保存到密码管理器，程序不会保存口令，也无法找回。
 3. 在管理菜单选择“只生成本地加密快照”，先执行隐私扫描。
 4. 在管理菜单选择“执行安全检查”，确认签名和所有文件哈希有效。
-5. 确认本地阶段正常后，再配置 Cloudflare。
+5. 确认本地阶段正常后，再根据下述操作配置 Cloudflare。
 
 首次初始化会在 `data` 中创建内容主密钥和 Ed25519 私钥的 DPAPI 密文。它们只能由当前 Windows 用户解开。解锁口令只负责在手机浏览器中解开内容主密钥，因此自动同步不需要保存你的口令。
 
@@ -39,7 +39,7 @@ https://dash.cloudflare.com/你的账户ID/home
 将“你的账户ID”替换为实际的 32 位 Account ID；不要把 API Token 填进这个网址。然后：
 
 1. 打开 `Codex对话-管理菜单.cmd`，进入“Cloudflare 与网址设置”。
-2. 输入一个尚未占用的 Pages 项目名，例如 `my-codex-mobile`。
+2. 输入一个尚未占用的 Pages 项目名，例如 `my-codex-mobile`。注意，此项目名将被引用为网址，具体见最后一行。
 3. 输入 Account ID。
 4. 输入 Token。输入过程不可见，Token 随即用 Windows DPAPI 加密保存。
 5. 双击 `Codex对话-一键同步.cmd`，首次创建 Direct Upload Pages 项目并部署。
@@ -137,6 +137,12 @@ LocalStorage 只保存非敏感的签名公钥指纹、最高快照序号、主�
 
 不要删除 `data`，否则自动同步无法解开内容主密钥。即使 Cloudflare Token 被盗，攻击者也不能直接解密既有对话；但他可能替换网页，因此仍应立即撤销 Token。
 
+## 同步与口令的识别
+
+若在"Codex-管理菜单"程序中新建了口令，则必须在管理菜单中执行一次"一键同步到手机" 或 直接双击运行一次"Codex-一键同步.cmd"程序。但是自动同步则不需要，旧口令依旧有效。旧口令指新建口令的上一次口令，而非所有旧口令。
+
+自动同步会在windows计划程序新建一个计划，触发条件是连接任何网络，可以win＋x进入计算机管理后查看。随后会进行同步，即使时间过了很久也会进行补同步，但是一天只会有2次固定，即隔12小时同步一次。
+
 ## 开发验证
 
 ```cmd
@@ -187,7 +193,7 @@ https://dash.cloudflare.com/your-account-id/home
 Replace `your-account-id` with the actual 32-character Account ID. Do not put the API Token in this URL. Then:
 
 1. Open `Codex对话-管理菜单.cmd` and enter `Cloudflare 与网址设置` (Cloudflare and Site Settings).
-2. Enter an unused Pages project name, such as `my-codex-mobile`.
+2. Enter an unused Pages project name, such as `my-codex-mobile`，Note that this project name will be quoted as a website address. For details, please refer to the last line.
 3. Enter the Account ID.
 4. Enter the Token. The input is hidden, and the Token is immediately encrypted with Windows DPAPI before it is stored.
 5. Double-click `Codex对话-一键同步.cmd` to create and deploy the Direct Upload Pages project for the first time.
@@ -286,6 +292,12 @@ A static site cannot provide absolute protection if the Cloudflare account is fu
 - `logs`: runtime logs that contain no Token, passphrase, or message contents
 
 Do not delete `data`, or automatic synchronization will no longer be able to unwrap the content master key. Even if the Cloudflare Token is stolen, an attacker cannot directly decrypt existing conversations. However, the attacker may be able to replace the web application, so you should still revoke the Token immediately.
+
+## Sync and Passphrase Recognition
+
+If you create a new passphrase in the "Codex-管理菜单.cmd", you must either select “Sync to Phone Now” in the menu or double-click "Codex-一键同步.cmd" once. Automatic synchronization does not require this; the previous passphrase will remain valid. Here, “previous passphrase” means the passphrase immediately before the newly created one, not every older passphrase.
+
+Automatic synchronization creates a scheduled task in Windows Task Scheduler. Its trigger condition is connecting to any network. You can view it by pressing Win + X and opening Computer Management. The task will perform synchronization even if the scheduled time has already passed, by running a catch-up synchronization. However, it has only two fixed synchronization slots per day, approximately 12 hours apart.
 
 ## Development Verification
 
